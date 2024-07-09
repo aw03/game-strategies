@@ -126,7 +126,7 @@ module Exercises = struct
       [ r + win_len - 1, c
       ; r, c + win_len - 1
       ; r + win_len - 1, c + win_len - 1
-      ; r + win_len - 1, c - win_len + 1
+      ; r + win_len - 1, c - (win_len - 1)
       ]
     in
     List.filter all_dir ~f:(fun (r, c) -> in_bounds r c board_len)
@@ -168,7 +168,7 @@ module Exercises = struct
     | _ -> Game_continues
   ;;
 
-  let get_win_peice (wins : (Game.Position.t * Game.Piece.t) list) game =
+  let get_win_piece (wins : (Game.Position.t * Game.Piece.t) list) game =
     match wins with
     | (_, piece) :: [] -> Game.Evaluation.Game_over { winner = Some piece }
     | [] -> game_board_continues game
@@ -186,7 +186,7 @@ module Exercises = struct
           (Map.filter_mapi game.board ~f:(fun ~key:pos ~data:piece ->
              any_wins piece pos.row pos.column board_len game))
       in
-      get_win_peice wins game)
+      get_win_piece wins game)
     else Game.Evaluation.Illegal_move
   ;;
 
@@ -194,22 +194,80 @@ module Exercises = struct
      down directions using neighbors when checking each coord see if it is in
      bounds *)
 
+  let match_wins
+    (piece : Game.Piece.t)
+    (game_eval : Game.Evaluation.t)
+    (pos : Game.Position.t)
+    =
+    match game_eval with
+    | Game_over winner ->
+      Option.bind winner.winner ~f:(fun w ->
+        if Game.Piece.equal w piece then Some pos else None)
+    | _ -> None
+  ;;
+
   (* Exercise 3 *)
   let winning_moves ~(me : Game.Piece.t) (game : Game.t)
     : Game.Position.t list
     =
-    ignore me;
-    ignore game;
-    failwith "Implement me!"
+    let all_moves = available_moves game in
+    List.dedup_and_sort
+      (List.filter_map all_moves ~f:(fun pos ->
+         let new_game = place_piece game ~piece:me ~position:pos in
+         match_wins me (evaluate new_game) pos))
+      ~compare:Game.Position.compare
+  ;;
+
+  let filter_out_moves all_moves to_filt =
+    (* List.filter all_moves ~f: (List.mem to_filt ~equal:(fun p1 p2 -> not
+       (Game.Position.equal p1 p2))) *)
+    Set.to_list
+      (Set.diff
+         (Game.Position.Set.of_list all_moves)
+         (Game.Position.Set.of_list to_filt))
   ;;
 
   (* Exercise 4 *)
   let losing_moves ~(me : Game.Piece.t) (game : Game.t)
     : Game.Position.t list
     =
-    ignore me;
-    ignore game;
-    failwith "Implement me!"
+    let opp_winning_moves = winning_moves ~me:(Game.Piece.flip me) game in
+    match opp_winning_moves with
+    | [] -> []
+    | _ :: [] ->
+      let all_moves = available_moves game in
+      filter_out_moves all_moves opp_winning_moves
+    | _ -> available_moves game
+  ;;
+
+  let available_moves_that_do_not_immediately_lose
+    ~(me : Game.Piece.t)
+    (game : Game.t)
+    =
+    let loser_moves = losing_moves ~me game in
+    let all_moves = available_moves game in
+    filter_out_moves all_moves loser_moves
+  ;;
+
+  let%expect_test "find legal nonlosing moves" =
+    let win_for_x =
+      let open Game in
+      empty_game
+      |> place_piece
+           ~piece:Piece.X
+           ~position:{ Position.row = 2; column = 0 }
+      |> place_piece
+           ~piece:Piece.X
+           ~position:{ Position.row = 1; column = 1 }
+    in
+    let moves =
+      available_moves_that_do_not_immediately_lose ~me:Game.Piece.O win_for_x
+    in
+    print_s [%sexp (moves : Game.Position.t list)];
+    [%expect {|
+  (((row 0) (column 2)))
+  |}];
+    return ()
   ;;
 
   let exercise_one =
@@ -270,6 +328,19 @@ module Exercises = struct
          return ())
   ;;
 
+  let exercise_five =
+    Command.async
+      ~summary:"Exercise 5: What are all legal non-losing moves?"
+      (let%map_open.Command () = return ()
+       and piece = piece_flag in
+       fun () ->
+         let legal_moves =
+           available_moves_that_do_not_immediately_lose ~me:piece non_win
+         in
+         print_s [%sexp (legal_moves : Game.Position.t list)];
+         return ())
+  ;;
+
   let command =
     Command.group
       ~summary:"Exercises"
@@ -277,6 +348,7 @@ module Exercises = struct
       ; "two", exercise_two
       ; "three", exercise_three
       ; "four", exercise_four
+      ; "five", exercise_five
       ]
   ;;
 end

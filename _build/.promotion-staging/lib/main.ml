@@ -35,21 +35,19 @@ module Exercises = struct
     |> place_piece ~piece:Piece.O ~position:{ Position.row = 2; column = 0 }
   ;;
 
+  let map_positions (game : Game.t) ~f =
+    let len = Game.Game_kind.board_length game.game_kind in
+    List.init len ~f:(fun row ->
+      List.init len ~f:(fun column -> f { Game.Position.row; column }))
+  ;;
+
   let print_game (game : Game.t) =
-    let game_list =
-      List.init (Game.Game_kind.board_length game.game_kind) ~f:(fun r ->
-        List.init (Game.Game_kind.board_length game.game_kind) ~f:(fun c ->
-          match
-            Map.find game.board { Game.Position.row = r; column = c }
-          with
-          | None -> " "
-          | Some piece -> Game.Piece.to_string piece))
-    in
-    let row_list =
-      List.map game_list ~f:(fun r -> String.concat ~sep:" | " r)
-    in
-    let game_string = String.concat ~sep:"\n---------\n" row_list in
-    print_endline game_string
+    map_positions game ~f:(fun pos ->
+      Map.find game.board pos
+      |> Option.value_map ~default:" " ~f:Game.Piece.to_string)
+    |> List.map ~f:(String.concat ~sep:" | ")
+    |> String.concat ~sep:"\n---------\n"
+    |> print_endline
   ;;
 
   let%expect_test "print_win_for_x" =
@@ -81,51 +79,198 @@ module Exercises = struct
   (* Exercise 1 *)
   let available_moves (game : Game.t) : Game.Position.t list =
     let spots_list =
-      List.init (Game.Game_kind.board_length game.game_kind) ~f:(fun r ->
-        List.init (Game.Game_kind.board_length game.game_kind) ~f:(fun c ->
-          match
-            Map.find game.board { Game.Position.row = r; column = c }
-          with
-          | None -> Some { Game.Position.row = r; column = c }
-          | Some _ -> None))
+      map_positions game ~f:(fun pos ->
+        match Map.find game.board pos with
+        | None -> Some pos
+        | Some _ -> None)
     in
     List.filter_opt (List.concat spots_list)
   ;;
 
-  let%expect_test "print_empty_board" =
+  let%expect_test "print_spaces_on_empty_board" =
     let moves = available_moves empty_game in
     print_s [%sexp (moves : Game.Position.t list)];
     [%expect
       {|
     (((row 0) (column 0)) ((row 0) (column 1)) ((row 0) (column 2)) 
-     ((row 1) (column 0)) ((row 1) (column 1)) ((row 1) (column 2))
+     ((row 1) (column 0)) ((row 1) (column 1)) ((row 1) (column 2)) 
      ((row 2) (column 0)) ((row 2) (column 1)) ((row 2) (column 2)))
     |}];
     return ()
   ;;
 
+  let make_step start finish =
+    if finish - start = 0
+    then start
+    else if finish - start < 0
+    then start - 1
+    else start + 1
+  ;;
+
+  let tup_equal (x1, y1) (x2, y2) = x1 = x2 && y1 = y2
+
+  let in_bounds r c board_len =
+    r >= 0 && r < board_len && c >= 0 && c < board_len
+  ;;
+
+  let check_same_piece (peice : Game.Piece.t) (game : Game.t) (row, column)
+    : bool
+    =
+    match Map.find game.board { Game.Position.row; column } with
+    | None -> false
+    | Some p -> Game.Piece.equal peice p
+  ;;
+
+  let viable_win_dir r c win_len board_len =
+    let all_dir =
+      [ r + win_len - 1, c
+      ; r, c + win_len - 1
+      ; r + win_len - 1, c + win_len - 1
+      ; r + win_len - 1, c - (win_len - 1)
+      ]
+    in
+    List.filter all_dir ~f:(fun (r, c) -> in_bounds r c board_len)
+  ;;
+
+  let rec check_win piece start_x start_y ~end_x ~end_y game : bool =
+    if tup_equal (start_x, start_y) (end_x, end_y)
+    then check_same_piece piece game (start_x, start_y)
+    else if not (check_same_piece piece game (start_x, start_y))
+    then false
+    else (
+      let curr_x = make_step start_x end_x in
+      let curr_y = make_step start_y end_y in
+      check_win piece curr_x curr_y ~end_x ~end_y game)
+  ;;
+
+  let any_wins piece start_x start_y board_len (game : Game.t)
+    : Game.Piece.t option
+    =
+    let pos_directions =
+      viable_win_dir
+        start_x
+        start_y
+        (Game.Game_kind.win_length game.game_kind)
+        board_len
+    in
+    match pos_directions with
+    | [] -> None
+    | lis ->
+      if List.exists lis ~f:(fun (end_x, end_y) ->
+           check_win piece start_x start_y ~end_x ~end_y game)
+      then Some piece
+      else None
+  ;;
+
+  let game_board_continues game =
+    match available_moves game with
+    | [] -> Game.Evaluation.Game_over { winner = None }
+    | _ -> Game_continues
+  ;;
+
+  let get_win_piece (wins : (Game.Position.t * Game.Piece.t) list) game =
+    match wins with
+    | (_, piece) :: [] -> Game.Evaluation.Game_over { winner = Some piece }
+    | [] -> game_board_continues game
+    | _ -> Illegal_move
+  ;;
+
   (* Exercise 2 *)
   let evaluate (game : Game.t) : Game.Evaluation.t =
-    ignore game;
-    failwith "Implement me!"
+    let board_len = Game.Game_kind.board_length game.game_kind in
+    if Map.for_alli game.board ~f:(fun ~key:pos ~data:_d ->
+         in_bounds pos.row pos.column board_len)
+    then (
+      let wins =
+        Map.to_alist
+          (Map.filter_mapi game.board ~f:(fun ~key:pos ~data:piece ->
+             any_wins piece pos.row pos.column board_len game))
+      in
+      get_win_piece wins game)
+    else Game.Evaluation.Illegal_move
+  ;;
+
+  (* iterate over all positions in the map check the right, down and diagonal
+     down directions using neighbors when checking each coord see if it is in
+     bounds *)
+
+  let match_wins
+    (piece : Game.Piece.t)
+    (game_eval : Game.Evaluation.t)
+    (pos : Game.Position.t)
+    =
+    match game_eval with
+    | Game_over winner ->
+      Option.bind winner.winner ~f:(fun w ->
+        if Game.Piece.equal w piece then Some pos else None)
+    | _ -> None
   ;;
 
   (* Exercise 3 *)
   let winning_moves ~(me : Game.Piece.t) (game : Game.t)
     : Game.Position.t list
     =
-    ignore me;
-    ignore game;
-    failwith "Implement me!"
+    let all_moves = available_moves game in
+    List.dedup_and_sort
+      (List.filter_map all_moves ~f:(fun pos ->
+         let new_game = place_piece game ~piece:me ~position:pos in
+         match_wins me (evaluate new_game) pos))
+      ~compare:Game.Position.compare
+  ;;
+
+  let filter_out_moves all_moves to_filt =
+    (* List.filter all_moves ~f: (List.mem to_filt ~equal:(fun p1 p2 -> not
+       (Game.Position.equal p1 p2))) *)
+    Set.to_list
+      (Set.diff
+         (Game.Position.Set.of_list all_moves)
+         (Game.Position.Set.of_list to_filt))
   ;;
 
   (* Exercise 4 *)
   let losing_moves ~(me : Game.Piece.t) (game : Game.t)
     : Game.Position.t list
     =
-    ignore me;
-    ignore game;
-    failwith "Implement me!"
+    let opp_winning_moves = winning_moves ~me:(Game.Piece.flip me) game in
+    match opp_winning_moves with
+    | [] -> []
+    | _ :: [] ->
+      let all_moves = available_moves game in
+      filter_out_moves all_moves opp_winning_moves
+    | _ -> available_moves game
+  ;;
+
+  let available_moves_that_do_not_immediately_lose
+    ~(me : Game.Piece.t)
+    (game : Game.t)
+    =
+    let loser_moves = losing_moves ~me game in
+    let all_moves = available_moves game in
+    filter_out_moves all_moves loser_moves
+  ;;
+
+  let%expect_test "find legal nonlosing moves" =
+    let win_for_x =
+      let open Game in
+      empty_game
+      |> place_piece
+           ~piece:Piece.X
+           ~position:{ Position.row = 2; column = 0 }
+      |> place_piece
+           ~piece:Piece.X
+           ~position:{ Position.row = 1; column = 1 }
+      |> place_piece
+           ~piece:Piece.X
+           ~position:{ Position.row = 0; column = 0 }
+    in
+    let moves =
+      available_moves_that_do_not_immediately_lose ~me:Game.Piece.O win_for_x
+    in
+    print_s [%sexp (moves : Game.Position.t list)];
+    [%expect {|
+  ()
+  |}];
+    return ()
   ;;
 
   let exercise_one =
@@ -147,7 +292,7 @@ module Exercises = struct
        fun () ->
          let evaluation = evaluate win_for_x in
          print_s [%sexp (evaluation : Game.Evaluation.t)];
-         let evaluation = evaluate win_for_x in
+         let evaluation = evaluate non_win in
          print_s [%sexp (evaluation : Game.Evaluation.t)];
          return ())
   ;;
@@ -186,6 +331,19 @@ module Exercises = struct
          return ())
   ;;
 
+  let exercise_five =
+    Command.async
+      ~summary:"Exercise 5: What are all legal non-losing moves?"
+      (let%map_open.Command () = return ()
+       and piece = piece_flag in
+       fun () ->
+         let legal_moves =
+           available_moves_that_do_not_immediately_lose ~me:piece non_win
+         in
+         print_s [%sexp (legal_moves : Game.Position.t list)];
+         return ())
+  ;;
+
   let command =
     Command.group
       ~summary:"Exercises"
@@ -193,6 +351,7 @@ module Exercises = struct
       ; "two", exercise_two
       ; "three", exercise_three
       ; "four", exercise_four
+      ; "five", exercise_five
       ]
   ;;
 end
