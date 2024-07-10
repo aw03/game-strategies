@@ -319,26 +319,32 @@ module Exercises = struct
   let pos_hueristic_comp (_p1, h1) (_p2, h2) = h1 - h2
   let give_pos_of_tip (p, _h) = p
 
-  let take_turn ~(game : Game.t) ~(me : Game.Piece.t) =
-    let poss_moves = available_moves_that_do_not_immediately_lose ~me game in
-    match poss_moves with
-    | [] -> List.random_element_exn (available_moves game)
-    | moves ->
-      let best_move_map =
-        List.map moves ~f:(fun pos ->
-          ( pos
-          , minimax
-              ~node:(place_piece game ~piece:me ~position:pos)
-              ~maximizing:false
-              (Game.Piece.flip me) ))
+  let make_turn ~(game : Game.t) ~(me : Game.Piece.t) : Game.Position.t =
+    let winning_moves = winning_moves ~me game in
+    if List.length winning_moves > 0
+    then List.hd_exn winning_moves
+    else (
+      let poss_moves =
+        available_moves_that_do_not_immediately_lose ~me game
       in
-      give_pos_of_tip
-        (Option.value_exn
-           (List.max_elt best_move_map ~compare:pos_hueristic_comp))
+      match poss_moves with
+      | [] -> List.random_element_exn (available_moves game)
+      | moves ->
+        let best_move_map =
+          List.map moves ~f:(fun pos ->
+            ( pos
+            , minimax
+                ~node:(place_piece game ~piece:me ~position:pos)
+                ~maximizing:false
+                (Game.Piece.flip me) ))
+        in
+        give_pos_of_tip
+          (Option.value_exn
+             (List.max_elt best_move_map ~compare:pos_hueristic_comp)))
   ;;
 
   let%expect_test "test mini_max_1" =
-    let best_move = take_turn ~game:non_win ~me:Game.Piece.X in
+    let best_move = make_turn ~game:non_win ~me:Game.Piece.X in
     print_s [%sexp (best_move : Game.Position.t)];
     [%expect {| ((row 1) (column 1))
     |}];
@@ -347,7 +353,7 @@ module Exercises = struct
 
   let%expect_test "test mini_max_2" =
     let best_move =
-      take_turn
+      make_turn
         ~game:
           (empty_game
            |> place_piece
@@ -367,9 +373,9 @@ module Exercises = struct
     return ()
   ;;
 
-  let%expect_test "test mini_max_2" =
+  let%expect_test "test mini_max_3" =
     let best_move =
-      take_turn
+      make_turn
         ~game:
           (empty_game
            |> place_piece
@@ -384,7 +390,31 @@ module Exercises = struct
         ~me:Game.Piece.X
     in
     print_s [%sexp (best_move : Game.Position.t)];
-    [%expect {| ((row 1) (column 0))
+    [%expect {| ((row 1) (column 1))
+|}];
+    return ()
+  ;;
+
+  let%expect_test "test mini_max_4" =
+    let best_move = make_turn ~game:empty_game ~me:Game.Piece.X in
+    print_s [%sexp (best_move : Game.Position.t)];
+    [%expect {| ((row 0) (column 0))
+|}];
+    return ()
+  ;;
+
+  let%expect_test "test mini_max_5" =
+    let best_move =
+      make_turn
+        ~game:
+          (empty_game
+           |> place_piece
+                ~piece:Game.Piece.X
+                ~position:{ Game.Position.row = 1; column = 1 })
+        ~me:Game.Piece.X
+    in
+    print_s [%sexp (best_move : Game.Position.t)];
+    [%expect {| ((row 1) (column 1))
 |}];
     return ()
   ;;
@@ -475,8 +505,8 @@ end
 let handle_turn (_client : unit) (query : Rpcs.Take_turn.Query.t) =
   print_s [%message "Received query" (query : Rpcs.Take_turn.Query.t)];
   let response =
-    { Rpcs.Take_turn.Response.piece = Game.Piece.X
-    ; position = { Game.Position.row = 0; column = 0 }
+    { Rpcs.Take_turn.Response.piece = query.you_play
+    ; position = Exercises.make_turn ~game:query.game ~me:query.you_play
     }
   in
   return response
