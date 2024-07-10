@@ -194,6 +194,7 @@ module Exercises = struct
      down directions using neighbors when checking each coord see if it is in
      bounds *)
 
+  (* If a position leads to a win the returns position else returns None*)
   let match_wins
     (piece : Game.Piece.t)
     (game_eval : Game.Evaluation.t)
@@ -267,6 +268,124 @@ module Exercises = struct
     [%expect {|
   (((row 0) (column 2)))
   |}];
+    return ()
+  ;;
+
+  let score (piece : Game.Piece.t) (game_result : Game.Evaluation.t) =
+    match game_result with
+    | Game_continues -> 0
+    | Game_over winner ->
+      (match winner.winner with
+       | None -> 0
+       | Some p ->
+         if Game.Piece.equal p piece then Int.max_value else Int.min_value)
+    | _ -> 0
+  ;;
+
+  let is_game_over (evaluation : Game.Evaluation.t) : bool =
+    match evaluation with Game.Evaluation.Game_over _ -> true | _ -> false
+  ;;
+
+  let rec minimax
+    ~(node : Game.t)
+    ~(maximizing : bool)
+    ?(depth = 10)
+    (player : Game.Piece.t)
+    : int
+    =
+    let evaluated = evaluate node in
+    if depth = 0 || is_game_over evaluated
+    then score player evaluated
+    else (
+      let value =
+        if maximizing then ref Int.min_value else ref Int.max_value
+      in
+      let max_or_min = if maximizing then Int.max else Int.min in
+      let moves =
+        available_moves_that_do_not_immediately_lose ~me:player node
+      in
+      let child_heurisitcs =
+        List.map moves ~f:(fun pos ->
+          minimax
+            ~depth:(depth - 1)
+            ~node:(place_piece node ~piece:player ~position:pos)
+            ~maximizing:(not maximizing)
+            (Game.Piece.flip player))
+      in
+      List.iter child_heurisitcs ~f:(fun h -> value := max_or_min h !value);
+      !value)
+  ;;
+
+  let pos_hueristic_comp (_p1, h1) (_p2, h2) = h1 - h2
+  let give_pos_of_tip (p, _h) = p
+
+  let take_turn ~(game : Game.t) ~(me : Game.Piece.t) =
+    let poss_moves = available_moves_that_do_not_immediately_lose ~me game in
+    match poss_moves with
+    | [] -> List.random_element_exn (available_moves game)
+    | moves ->
+      let best_move_map =
+        List.map moves ~f:(fun pos ->
+          ( pos
+          , minimax
+              ~node:(place_piece game ~piece:me ~position:pos)
+              ~maximizing:false
+              (Game.Piece.flip me) ))
+      in
+      give_pos_of_tip
+        (Option.value_exn
+           (List.max_elt best_move_map ~compare:pos_hueristic_comp))
+  ;;
+
+  let%expect_test "test mini_max_1" =
+    let best_move = take_turn ~game:non_win ~me:Game.Piece.X in
+    print_s [%sexp (best_move : Game.Position.t)];
+    [%expect {| ((row 1) (column 1))
+    |}];
+    return ()
+  ;;
+
+  let%expect_test "test mini_max_2" =
+    let best_move =
+      take_turn
+        ~game:
+          (empty_game
+           |> place_piece
+                ~piece:Game.Piece.X
+                ~position:{ Game.Position.row = 0; column = 0 }
+           |> place_piece
+                ~piece:Game.Piece.X
+                ~position:{ Game.Position.row = 2; column = 0 }
+           |> place_piece
+                ~piece:Game.Piece.O
+                ~position:{ Game.Position.row = 0; column = 2 })
+        ~me:Game.Piece.X
+    in
+    print_s [%sexp (best_move : Game.Position.t)];
+    [%expect {| ((row 1) (column 0))
+  |}];
+    return ()
+  ;;
+
+  let%expect_test "test mini_max_2" =
+    let best_move =
+      take_turn
+        ~game:
+          (empty_game
+           |> place_piece
+                ~piece:Game.Piece.X
+                ~position:{ Game.Position.row = 0; column = 1 }
+           |> place_piece
+                ~piece:Game.Piece.X
+                ~position:{ Game.Position.row = 1; column = 0 }
+           |> place_piece
+                ~piece:Game.Piece.O
+                ~position:{ Game.Position.row = 0; column = 0 })
+        ~me:Game.Piece.X
+    in
+    print_s [%sexp (best_move : Game.Position.t)];
+    [%expect {| ((row 1) (column 0))
+|}];
     return ()
   ;;
 
