@@ -271,14 +271,32 @@ module Exercises = struct
     return ()
   ;;
 
-  let score (piece : Game.Piece.t) (game_result : Game.Evaluation.t) =
+  let check_hot_spots (game : Game.t) (player : Game.Piece.t) =
+    let bord = Game.Game_kind.board_length game.game_kind in
+    let best_spots =
+      [ { Game.Position.row = 0; column = 0 }
+      ; { Game.Position.row = 0; column = bord - 1 }
+      ; { Game.Position.row = bord - 1; column = 0 }
+      ; { Game.Position.row = bord - 1; column = bord - 1 }
+      ; { Game.Position.row = bord / 2; column = bord / 2 }
+      ]
+    in
+    List.length
+      (List.filter best_spots ~f:(fun spot ->
+         Map.existsi game.board ~f:(fun ~key:k ~data:v ->
+           Game.Position.equal spot k && Game.Piece.equal player v)))
+  ;;
+
+  let score (piece : Game.Piece.t) (game_result : Game.Evaluation.t) game =
     match game_result with
     | Game_continues -> 0
     | Game_over winner ->
       (match winner.winner with
-       | None -> 0
+       | None -> check_hot_spots game piece
        | Some p ->
-         if Game.Piece.equal p piece then Int.max_value else Int.min_value)
+         if Game.Piece.equal p piece
+         then (Int.max_value / 2) + check_hot_spots game piece
+         else (Int.min_value / 2) + check_hot_spots game piece)
     | _ -> 0
   ;;
 
@@ -289,13 +307,13 @@ module Exercises = struct
   let rec minimax
     ~(node : Game.t)
     ~(maximizing : bool)
-    ?(depth = 10)
+    ?(depth = 5)
     (player : Game.Piece.t)
     : int
     =
     let evaluated = evaluate node in
     if depth = 0 || is_game_over evaluated
-    then score player evaluated
+    then score player evaluated node
     else (
       let value =
         if maximizing then ref Int.min_value else ref Int.max_value
@@ -317,7 +335,11 @@ module Exercises = struct
   ;;
 
   let pos_hueristic_comp (_p1, h1) (_p2, h2) = h1 - h2
-  let give_pos_of_tip (p, _h) = p
+
+  let give_pos_of_tip (p, _h) =
+    print_s [%sexp (_h : int)];
+    p
+  ;;
 
   let make_turn ~(game : Game.t) ~(me : Game.Piece.t) : Game.Position.t =
     let winning_moves = winning_moves ~me game in
@@ -330,7 +352,7 @@ module Exercises = struct
       match poss_moves with
       | [] -> List.random_element_exn (available_moves game)
       | moves ->
-        let best_move_map =
+        let best_move_list =
           List.map moves ~f:(fun pos ->
             ( pos
             , minimax
@@ -340,7 +362,7 @@ module Exercises = struct
         in
         give_pos_of_tip
           (Option.value_exn
-             (List.max_elt best_move_map ~compare:pos_hueristic_comp)))
+             (List.min_elt best_move_list ~compare:pos_hueristic_comp)))
   ;;
 
   let%expect_test "test mini_max_1" =
@@ -510,6 +532,24 @@ let handle_turn (_client : unit) (query : Rpcs.Take_turn.Query.t) =
     }
   in
   return response
+;;
+
+let test_game =
+  let new_game = Exercises.empty_game in
+  let turns = List.init 9 ~f:(fun a -> a) in
+  List.fold turns ~init:(new_game, Game.Piece.X) ~f:(fun (g, p) _t ->
+    let new_pos = Exercises.make_turn ~game:g ~me:p in
+    let ng = Exercises.place_piece g ~piece:p ~position:new_pos in
+    Exercises.print_game ng;
+    print_endline "";
+    ng, Game.Piece.flip p)
+;;
+
+let%expect_test "testing against self" =
+  let _ = test_game in
+  print_endline "";
+  [%expect {| |}];
+  return ()
 ;;
 
 let implementations =

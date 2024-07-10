@@ -78,6 +78,6 @@ type t =
   { game_kind : Game_kind.t
   ; board : Piece.t Position.Map.t
   }
-[@@deriving sexp_of, bin_io]
+[@@deriving sexp_of, bin_io, equal]
 
 val empty : Game_kind.t -> t
