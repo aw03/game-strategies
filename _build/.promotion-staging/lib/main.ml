@@ -337,7 +337,7 @@ module Exercises = struct
   let rec minimax
     ~(node : Game.t)
     ~(maximizing : bool)
-    ?(depth = 10)
+    ?(depth = 0)
     ?(alpha = Int.min_value)
     ?(beta = Int.max_value)
     (player : Game.Piece.t)
@@ -463,7 +463,7 @@ module Exercises = struct
         ~me:Game.Piece.O
     in
     print_s [%sexp (best_move : Game.Position.t)];
-    [%expect {| ((row 1) (column 1))
+    [%expect {| ((row 0) (column 2))
 |}];
     return ()
   ;;
@@ -487,7 +487,7 @@ module Exercises = struct
         ~me:Game.Piece.O
     in
     print_s [%sexp (best_move : Game.Position.t)];
-    [%expect {| ((row 1) (column 1))
+    [%expect {| ((row 0) (column 1))
 |}];
     return ()
   ;;
@@ -598,15 +598,33 @@ let handle_turn (_client : unit) (query : Rpcs.Take_turn.Query.t) =
   return response
 ;;
 
-(* let test_game = let new_game = Exercises.empty_game in let turns =
+(* let test_tic_tac_toe = let new_game = Exercises.empty_game in let turns =
    List.init 9 ~f:(fun a -> a) in List.fold turns ~init:(new_game,
    Game.Piece.X) ~f:(fun (g, p) _t -> let new_pos = Exercises.make_turn
    ~game:g ~me:p in let ng = Exercises.place_piece g ~piece:p
    ~position:new_pos in Exercises.print_game ng; print_endline ""; ng,
    Game.Piece.flip p) ;;
 
-   let%expect_test "testing against self" = let _ = test_game in
+   let%expect_test "testing against self" = let _ = test_tic_tac_toe in
    print_endline ""; [%expect {| |}]; return () ;; *)
+
+let test_omok =
+  let new_game = Exercises.empty_game_omok in
+  let turns = List.init 9 ~f:(fun a -> a) in
+  List.fold turns ~init:(new_game, Game.Piece.X) ~f:(fun (g, p) _t ->
+    let new_pos = Exercises.make_turn ~game:g ~me:p in
+    let ng = Exercises.place_piece g ~piece:p ~position:new_pos in
+    Exercises.print_game ng;
+    print_endline "";
+    ng, Game.Piece.flip p)
+;;
+
+let%expect_test "testing against self" =
+  let _ = test_omok in
+  print_endline "";
+  [%expect {| |}];
+  return ()
+;;
 
 let implementations =
   Rpc.Implementations.create_exn
