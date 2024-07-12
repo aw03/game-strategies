@@ -185,16 +185,10 @@ module Exercises = struct
       check_win piece curr_x curr_y ~end_x ~end_y game)
   ;;
 
-  let any_wins piece start_x start_y board_len (game : Game.t)
+  let any_wins piece start_x start_y board_len (game : Game.t) win_len
     : Game.Piece.t option
     =
-    let pos_directions =
-      viable_win_dir
-        start_x
-        start_y
-        (Game.Game_kind.win_length game.game_kind)
-        board_len
-    in
+    let pos_directions = viable_win_dir start_x start_y win_len board_len in
     match pos_directions with
     | [] -> None
     | lis ->
@@ -218,18 +212,47 @@ module Exercises = struct
   ;;
 
   (* Exercise 2 *)
-  let evaluate (game : Game.t) : Game.Evaluation.t =
+  let evaluate ?(win_len : int option) (game : Game.t) : Game.Evaluation.t =
     let board_len = Game.Game_kind.board_length game.game_kind in
     if Map.for_alli game.board ~f:(fun ~key:pos ~data:_d ->
          in_bounds pos.row pos.column board_len)
     then (
+      let len =
+        match win_len with
+        | None -> Game.Game_kind.win_length game.game_kind
+        | Some l -> l
+      in
       let wins =
         Map.to_alist
           (Map.filter_mapi game.board ~f:(fun ~key:pos ~data:piece ->
-             any_wins piece pos.row pos.column board_len game))
+             any_wins piece pos.row pos.column board_len game len))
       in
       get_win_piece wins game)
     else Game.Evaluation.Illegal_move
+  ;;
+
+  let num_pieces_wins ~me wins ~len =
+    match wins with
+    | [] -> 0
+    | lis ->
+      let total = ref 0 in
+      List.iter lis ~f:(fun (_pos, piece) ->
+        match Game.Piece.equal me piece with
+        | true -> total := !total + (len * len)
+        | false -> total := !total - (len * len));
+      !total
+  ;;
+
+  let num_pieces_in_row ~(len : int) (game : Game.t) ~(me : Game.Piece.t)
+    : int
+    =
+    let board_len = Game.Game_kind.board_length game.game_kind in
+    let wins =
+      Map.to_alist
+        (Map.filter_mapi game.board ~f:(fun ~key:pos ~data:piece ->
+           any_wins piece pos.row pos.column board_len game len))
+    in
+    num_pieces_wins ~len ~me wins
   ;;
 
   (* iterate over all positions in the map check the right, down and diagonal
@@ -283,19 +306,24 @@ module Exercises = struct
     filter_out_moves all_moves loser_moves
   ;;
 
+  let intersect_lists
+    (lis1 : Game.Position.t list)
+    (lis2 : Game.Position.t list)
+    =
+    Set.to_list
+      (Set.inter
+         (Game.Position.Set.of_list lis1)
+         (Game.Position.Set.of_list lis2))
+  ;;
+
   let _available_neighoring_moves_dont_lose
     ~(me : Game.Piece.t)
     (game : Game.t)
     : Game.Position.t list
     =
-    let dont_lose =
-      Game.Position.Set.of_list
-        (available_moves_that_do_not_immediately_lose ~me game)
-    in
-    let neighbors =
-      Game.Position.Set.of_list (available_neighor_moves game)
-    in
-    Set.to_list (Set.inter dont_lose neighbors)
+    let dont_lose = available_moves_that_do_not_immediately_lose ~me game in
+    let neighbors = available_neighor_moves game in
+    intersect_lists dont_lose neighbors
   ;;
 
   let%expect_test "find legal nonlosing moves" =
@@ -335,9 +363,14 @@ module Exercises = struct
            Game.Position.equal spot k && Game.Piece.equal player v)))
   ;;
 
-  let calc_chains_in_row (_piece : Game.Piece.t) (_game : Game.t) : int = 0
+  let calc_chains_in_row (piece : Game.Piece.t) (game : Game.t) : int =
+    num_pieces_in_row ~len:4 game ~me:piece
+    + num_pieces_in_row ~len:3 game ~me:piece
+    + num_pieces_in_row ~len:2 game ~me:piece
+    + num_pieces_in_row ~len:1 game ~me:piece
+  ;;
 
-  let _omok_score_calc
+  let omok_score_calc
     (piece : Game.Piece.t)
     (game_result : Game.Evaluation.t)
     (game : Game.t)
@@ -358,7 +391,7 @@ module Exercises = struct
     (game : Game.t)
     =
     match game.game_kind with
-    | Omok -> 0
+    | Omok -> omok_score_calc piece game_result game
     | Tic_tac_toe ->
       (match game_result with
        | Game_continues -> check_hot_spots game piece
@@ -401,7 +434,7 @@ module Exercises = struct
   let rec minimax
     ~(node : Game.t)
     ~(maximizing : bool)
-    ?(depth = 1)
+    ?(depth = 9)
     ?(alpha = Int.min_value)
     ?(beta = Int.max_value)
     (player : Game.Piece.t)
@@ -418,9 +451,7 @@ module Exercises = struct
         if maximizing then ref Int.min_value else ref Int.max_value
       in
       let max_or_min = if maximizing then Int.max else Int.min in
-      let moves =
-        available_moves_that_do_not_immediately_lose ~me:player node
-      in
+      let moves = _available_neighoring_moves_dont_lose ~me:player node in
       let a = ref alpha in
       let b = ref beta in
       let _child_heurisitcs =
@@ -461,9 +492,7 @@ module Exercises = struct
     if List.length winning_moves > 0
     then List.hd_exn winning_moves
     else (
-      let poss_moves =
-        available_moves_that_do_not_immediately_lose ~me game
-      in
+      let poss_moves = _available_neighoring_moves_dont_lose ~me game in
       match poss_moves with
       | [] -> List.random_element_exn (available_moves game)
       | moves ->
@@ -645,7 +674,7 @@ module Exercises = struct
       (let%map_open.Command () = return ()
        and piece = piece_flag in
        fun () ->
-         let turns = List.init 9 ~f:(fun a -> a) in
+         let turns = List.init 150 ~f:(fun a -> a) in
          let _ =
            List.fold
              turns
@@ -684,23 +713,15 @@ let handle_turn (_client : unit) (query : Rpcs.Take_turn.Query.t) =
   return response
 ;;
 
-let test_omok =
-  let new_game = Exercises.empty_game_omok in
-  let turns = List.init 9 ~f:(fun a -> a) in
-  List.fold turns ~init:(new_game, Game.Piece.X) ~f:(fun (g, p) _t ->
-    let new_pos = Exercises.make_turn ~game:g ~me:p in
-    let ng = Exercises.place_piece g ~piece:p ~position:new_pos in
-    Exercises.print_game ng;
-    print_endline "";
-    ng, Game.Piece.flip p)
-;;
+(* let test_omok = let new_game = Exercises.empty_game_omok in let turns =
+   List.init 9 ~f:(fun a -> a) in List.fold turns ~init:(new_game,
+   Game.Piece.X) ~f:(fun (g, p) _t -> let new_pos = Exercises.make_turn
+   ~game:g ~me:p in let ng = Exercises.place_piece g ~piece:p
+   ~position:new_pos in Exercises.print_game ng; print_endline ""; ng,
+   Game.Piece.flip p) ;;
 
-let%expect_test "testing against self" =
-  let _ = test_omok in
-  print_endline "";
-  [%expect {| |}];
-  return ()
-;;
+   let%expect_test "testing against self" = let _ = test_omok in
+   print_endline ""; [%expect {| |}]; return () ;; *)
 
 let implementations =
   Rpc.Implementations.create_exn
